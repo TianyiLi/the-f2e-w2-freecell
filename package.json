@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "core-js": "^2.6.5",
+    "gh-pages": "^2.0.1",
     "vue": "^2.6.10"
   },
   "devDependencies": {
