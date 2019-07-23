@@ -1,5 +1,6 @@
 <template>
-  <div id="app">
+  <div id="app"
+    ref="app">
     <img src="./assets/hint_up/freecell_logo@2x.png"
       alt=""
       class="logo">
@@ -20,22 +21,32 @@
     <div class="board">
       <div class="free-space">
         <div class="free-space-ctn"
-          v-for="i in 4"
-          :key="i"></div>
+          v-for="(card, i) in freeSpace"
+          :key="i">
+          <img v-if="card !== 0"
+            :src="getCard(card.value)"
+            alt="">
+        </div>
       </div>
       <div class="target-space">
         <div class="target-ctn"
-          v-for="i in 4"
-          :key="i"></div>
+          v-for="(topCard, i) in targetSpace"
+          :key="i">
+          <img v-if="topCard !== 0"
+            :src="getCard(topCard)"
+            alt="">
+        </div>
       </div>
       <div class="bottom-space">
         <div class="stack"
           v-for="(stack, i) in cards"
           :key="i">
           <div class="card"
+            :draggable="card.draggable"
             v-for="(card, j) in stack"
+            :data-value="card.value"
             :key="j">
-            <img :src="getCard(card)">
+            <img :src="getCard(card.value)">
           </div>
         </div>
       </div>
@@ -46,16 +57,25 @@
   </div>
 </template>
 <script>
-import shuffle from 'lodash/shuffle'
 import Panel from './components/Panel'
+import _ from 'lodash'
+import constant from './constant'
 const card = require.context('./assets/CARDS')
-const sort = ['tr', 'ca', 'cc', 'pi']
-function cardCal (i) {
-  if (i === 0) return false
-  const number = (i - 1) % 13 + 1
-  const category = sort[~~((i - 1) / 13)]
-  return card(`./${category}_${number}.svg`)
-}
+const suits = ['tr', 'ca', 'cc', 'pi']
+/**
+ * @typedef CardBasic
+ * @property {number} value
+ * @property {boolean} draggable
+ */
+
+/**
+ * @typedef PokerBasic
+ * @property {number} number
+ * @property {'tr'|'ca'|'cc'|'pi'} suit
+ */
+
+/** @type {[number, {number:number, suit: 'tr'|'ca'|'cc'|'pi'}][]} */
+const CardTypes = _.range(1, 53).map(v => [v, { number: (v - 1) % 13 + 1, suit: suits[~~((v - 1) / 13)] }])
 
 export default {
   name: 'app',
@@ -64,37 +84,172 @@ export default {
   },
   created () {
     this.init()
+    window.tmpMoveToFreeSpace = this.tmpMoveToFreeSpace.bind(this)
+    window.tmpMoveToStack = this.tmpMoveToStack.bind(this)
+    this.tmpDragList = {
+      cardsPos: {
+        i: 0,
+        j: 6,
+        length: 1
+      },
+      from: 'stack'
+    }
+  },
+  mounted () {
+    this.tableResize()
+    window.addEventListener('resize', () => this.tableResize())
   },
   data () {
     return {
-      /** @type {number[][]} */
+      /** @type {CardBasic[][]} */
       cards: [],
-      /** @type {number[]} */
+      /** @type {CardBasic[]} */
       freeSpace: [0, 0, 0, 0],
       /** @type {number[]} */
       targetSpace: [0, 0, 0, 0],
       panelIsShow: false,
-      isWin: false
+      isWin: false,
+      /** @type {{cardsPos: {i: number, j:number, length:number}, from: 'stack'} | {cardsPos: {i:number}, from: 'freeSpace'}} */
+      tmpDragList: null,
+      memoryStack: [],
+      cardType: new Map(CardTypes)
+    }
+  },
+  computed: {
+    allowMovementAmount () {
+      let topFreeSpace = _.sum(this.freeSpace.map(e => +(!!e))) + 1
+      let bottomFreeSpace = _.sum(this.cards.map(e => (!!e && +(!!e.length)) || 0)) + 1
+      if ((topFreeSpace + bottomFreeSpace) === 3) return 1
+      else if ((topFreeSpace + bottomFreeSpace) === 2) return 0
+      else {
+        return Math.min(topFreeSpace * bottomFreeSpace, 13)
+      }
     }
   },
   methods: {
+    tableResize () {
+      const table = this.$refs['app']
+      if (!table) return
+      const clientWidth = window.innerWidth
+      let scaleX = 1
+      scaleX = clientWidth / (table.offsetWidth + 25)
+      table.style.transform = `scale(${scaleX > 1 ? 1 : scaleX})`
+      table.style.margin = '0 auto'
+      table.style.transformOrigin = 'top left'
+    },
     init () {
-      let cards = Array.from({ length: 52 }, (_, i) => (i + 1))
-      cards = shuffle(cards)
+      let cards = Array.from({ length: 52 }, (_, i) => ({ value: (i + 1), draggable: false }))
+      cards = _.shuffle(cards)
       for (let i = 0; i < 4; i++) {
-        this.cards.push(cards.splice(0, 7))
+        this.cards.push(this.cardInStackIsDraggable(cards.splice(0, 7)))
       }
       for (let i = 0; i < 4; i++) {
-        this.cards.push(cards.splice(0, 6))
+        this.cards.push(this.cardInStackIsDraggable(cards.splice(0, 6)))
       }
       console.log(this.cards)
     },
-    freeSpaceOnDragover () {
+    /** @param {CardBasic[]} stack */
+    cardInStackIsDraggable (stack = []) {
+      if (!stack.length) return stack
+      let prevCard = stack[stack.length - 1]
+      prevCard.draggable = true
+      // FIXME: reset the calculate
+      if (stack.length === 1) return stack
+      for (let i = stack.length - 2; i >= (this.allowMovementAmount <= stack.length ? stack.length - this.allowMovementAmount : 0); (i--)) {
+        if (stack[i] === stack[i + 1].value + 1) {
+          stack[i].draggable = true
+        } else {
+          return stack
+        }
+      }
+      return stack
+    },
+    getCardColor (suit = '') {
+      return ['tr', 'pi'].includes(suit) ? 'black' : 'red'
+    },
+    /**
+     * @param {PokerBasic} card
+     * @param {CardBasic[]} targetStack
+     */
+    stackCanDrop (card, targetStack) {
+      if (targetStack.length === 0) return true
+      const targetStackTopCard = this.cardType.get(targetStack[targetStack.length - 1].value)
+      if (this.getCardColor(card.suit) === this.getCardColor(targetStackTopCard)) {
+        return false
+      } else {
+        if ((card.number + 1) === targetStackTopCard.number) {
+          return true
+        } else {
+          return false
+        }
+      }
+    },
+    freeSpaceCanDrop (targetId = 0) {
+      return this.freeSpace[targetId] === 0
+    },
+    /**
+     * @param {number} freeSpaceId
+     */
+    tmpMoveToFreeSpace (freeSpaceId) {
+      if (this.tmpDragList.from === 'freeSpace') {
+        if (this.tmpDragList.cardsPos.i === freeSpaceId) return true
+        else {
+          [this.freeSpace[freeSpaceId], this.freeSpace[this.tmpDragList.cardsPos.i]] = [this.freeSpace[this.tmpDragList.cardsPos.i], this.freeSpace[freeSpaceId]]
+          this.pushToMemoryStack(this.tmpDragList.from, 'freeSpace', this.tmpDragList.cardsPos, { i: freeSpaceId })
+          this.tmpDragList = null
+          return true
+        }
+      } else {
+        if (this.tmpDragList.cardsPos.length > 1) {
+          alert(constant.THE_ACTION_IS_INVALID)
+          this.tmpDragList = null
+          return false
+        } else {
+          let { i } = this.tmpDragList.cardsPos
+          this.freeSpace[freeSpaceId] = this.cards[i].pop()
+          this.pushToMemoryStack(this.tmpDragList.from, 'freeSpace', this.tmpDragList.cardsPos, { i: freeSpaceId })
+          this.tmpDragList = null
+          return true
+        }
+      }
+    },
+    /**
+     * @param {number} stackId
+     */
+    tmpMoveToStack (stackId) {
+      if (this.tmpDragList.from === 'freeSpace') {
+        // confirm the input card value is card stack last card value - 1
+        this.cards[stackId].push(this.freeSpace[this.tmpDragList.cardsPos.i])
+        this.freeSpace[this.tmpDragList.cardsPos.i] = 0
+        this.pushToMemoryStack(this.tmpDragList.from, 'stack', this.tmpDragList.cardsPos, { i: stackId })
+        this.tmpDragList = null
+        return true
+      } else {
+        if (this.tmpDragList.cardsPos.length > this.allowMovementAmount) {
+          alert(constant.THE_ACTION_IS_INVALID)
+          this.tmpDragList = null
+          return false
+        }
+        [].push.call(this.cards[stackId], ...this.cards[this.tmpDragList.cardsPos.i].splice(this.tmpDragList.cardsPos.j))
+        this.pushToMemoryStack(this.tmpDragList.from, 'stack', this.tmpDragList.cardsPos, { i: stackId })
+        this.tmpDragList = null
+        return true
+      }
+    },
+    scanAndMoveToTargetSpace () {
 
     },
+    pushToMemoryStack (from, to, cardsPos, targetPos) {
+      this.memoryStack.push({ from, to, fromDetail: JSON.parse(JSON.stringify(cardsPos)), toDetail: JSON.parse(JSON.stringify(targetPos)) })
+    },
+    recoveryFromMemoryStack () {
+      // this.memoryStack
+    },
+    cardOnDragStart () { },
+    cardOnDragEnd () { },
     freeSpaceOnDrop () { },
     getCard (num) {
-      return cardCal(num)
+      return card(`./${this.cardType.get(num).suit}_${this.cardType.get(num).number}.svg`)
     }
   }
 }
@@ -108,12 +263,13 @@ html, body
   height 100%
   margin 0
   padding 0
+  background linear-gradient(#0F1620 80%, rgba(#0F1620, 0.6))
+  overflow-x hidden
 #app
   font-family 'Segoe UI Regular', 'Avenir', Helvetica, Arial, sans-serif
   -webkit-font-smoothing antialiased
   -moz-osx-font-smoothing grayscale
   size 1920px 1080px
-  background-color #0F1620
   position relative
   .logo
     size 384px 51px
@@ -207,12 +363,14 @@ html, body
       .card
         margin-bottom -160px
         position relative
-        &:last-of-type:hover:after
-          content ''
-          position absolute
-          top -16px
-          left -16px
-          size 184px 245px
-          background url('./assets/hint_up/hint_up@2x.png')
-          background-size contain
+        &[draggable='true']:hover
+          margin-bottom -140px
+          &:not(:active):after
+            content ''
+            position absolute
+            top -16px
+            left -16px
+            size 184px 245px
+            background url('./assets/hint_up/hint_up@2x.png')
+            background-size contain
 </style>
