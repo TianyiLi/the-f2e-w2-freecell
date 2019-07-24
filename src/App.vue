@@ -41,6 +41,8 @@
       <div class="bottom-space">
         <div class="stack"
           v-for="(stack, i) in cards"
+          @drop.prevent="stackOnDrop($event, i)"
+          @dragover.prevent
           :key="i">
           <div class="card"
             :draggable="card.draggable"
@@ -280,7 +282,23 @@ export default {
     },
     cardOnDragEnd () { },
     freeSpaceOnDrop () { },
-    stackOnDrop () { },
+    /**
+     * @param {DragEcent} ev
+     */
+    stackOnDrop (ev, stackId) {
+      let cardPos = JSON.parse(ev.dataTransfer.getData('text'))
+      console.log(cardPos)
+      if (cardPos.from === 'stack') {
+        let targetCardStack = this.cards[stackId]
+        let candidates = _.takeRight(this.cards[cardPos.i], this.$refs['ghost'].childElementCount)
+        let firstCard = this.cardType.get(candidates[0].value)
+        let canDrop = this.stackCanDrop(firstCard, targetCardStack)
+        console.log(canDrop)
+      } else {
+        let cardStack = this.freeSpace[cardPos.i]
+      }
+      // this.stackCanDrop()
+    },
     getCard (num) {
       return card(`./${this.cardType.get(num).suit}_${this.cardType.get(num).number}.svg`)
     }
@@ -392,6 +410,7 @@ html, body
     .stack
       width 152px
       min-height 215px
+      padding-bottom 160px
       display inline-block
       .card
         margin-bottom -160px
