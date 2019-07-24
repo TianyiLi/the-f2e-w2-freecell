@@ -10,13 +10,14 @@
     <img src="./assets/hint_up/undo@2x.png"
       alt=""
       class="undo"
-      @click="(isWin = true, panelIsShow = true)">
+      @click.stop="init()">
     <img src="./assets/hint_up/hint@2x.png"
       alt=""
       class="hint"
-      @click="(isWin = false, panelIsShow = true)">
+      @click="(isWin = true, panelIsShow = true)">
     <img src="./assets/hint_up/Group 1293.svg"
       alt=""
+      @click="(isWin = false, panelIsShow = true)"
       class="group">
     <div class="board">
       <div class="free-space">
@@ -43,10 +44,12 @@
           :key="i">
           <div class="card"
             :draggable="card.draggable"
-            v-for="(card, j) in stack"
             :data-value="card.value"
+            @dragstart.stop="cardOnDragStart($event, i, 'stack', 'card' + card.value)"
+            v-for="(card, j) in stack"
             :key="j">
-            <img :src="getCard(card.value)">
+            <img :ref="'card' + card.value"
+              :src="getCard(card.value)">
           </div>
         </div>
       </div>
@@ -54,6 +57,11 @@
     <Panel v-if="panelIsShow"
       v-model="panelIsShow"
       :isWin="isWin"></Panel>
+    <div class="ghost-space">
+      <div class="ghost"
+        id="ghost"
+        ref="ghost"></div>
+    </div>
   </div>
 </template>
 <script>
@@ -82,7 +90,9 @@ export default {
   components: {
     Panel
   },
-  created () {
+  mounted () {
+    // this.tableResize()
+    // window.addEventListener('resize', () => this.tableResize())
     this.init()
     window.tmpMoveToFreeSpace = this.tmpMoveToFreeSpace.bind(this)
     window.tmpMoveToStack = this.tmpMoveToStack.bind(this)
@@ -94,10 +104,6 @@ export default {
       },
       from: 'stack'
     }
-  },
-  mounted () {
-    this.tableResize()
-    window.addEventListener('resize', () => this.tableResize())
   },
   data () {
     return {
@@ -112,13 +118,18 @@ export default {
       /** @type {{cardsPos: {i: number, j:number, length:number}, from: 'stack'} | {cardsPos: {i:number}, from: 'freeSpace'}} */
       tmpDragList: null,
       memoryStack: [],
-      cardType: new Map(CardTypes)
+      cardType: new Map(CardTypes),
+      currentSnapShot: {}
     }
   },
   computed: {
     allowMovementAmount () {
-      let topFreeSpace = _.sum(this.freeSpace.map(e => +(!!e))) + 1
-      let bottomFreeSpace = _.sum(this.cards.map(e => (!!e && +(!!e.length)) || 0)) + 1
+      let topFreeSpace = _.sum(this.freeSpace.map(e => +(!e))) + 1
+      let bottomFreeSpace = _.sum(this.cards.map(e => {
+        return (!!e && +(!e.length)) || 0
+      })) + 1
+      console.log(topFreeSpace)
+      console.log(bottomFreeSpace)
       if ((topFreeSpace + bottomFreeSpace) === 3) return 1
       else if ((topFreeSpace + bottomFreeSpace) === 2) return 0
       else {
@@ -127,25 +138,24 @@ export default {
     }
   },
   methods: {
-    tableResize () {
-      const table = this.$refs['app']
-      if (!table) return
-      const clientWidth = window.innerWidth
-      let scaleX = 1
-      scaleX = clientWidth / (table.offsetWidth + 25)
-      table.style.transform = `scale(${scaleX > 1 ? 1 : scaleX})`
-      table.style.margin = '0 auto'
-      table.style.transformOrigin = 'top left'
-    },
     init () {
+      this.freeSpace = [0, 0, 0, 0]
+      this.targetSpace = [0, 0, 0, 0]
+      this.tmpDragList = null
+      this.memoryStack = []
+      let _tmpStacks = []
+      this.cards = Array(8).fill([{ value: 1, draggable: false }])
+
       let cards = Array.from({ length: 52 }, (_, i) => ({ value: (i + 1), draggable: false }))
       cards = _.shuffle(cards)
       for (let i = 0; i < 4; i++) {
-        this.cards.push(this.cardInStackIsDraggable(cards.splice(0, 7)))
+        _tmpStacks.push(this.cardInStackIsDraggable(cards.splice(0, 7)))
       }
       for (let i = 0; i < 4; i++) {
-        this.cards.push(this.cardInStackIsDraggable(cards.splice(0, 6)))
+        _tmpStacks.push(this.cardInStackIsDraggable(cards.splice(0, 6)))
       }
+      this.cards = JSON.parse(JSON.stringify(_tmpStacks))
+      this.currentSnapShot = JSON.parse(JSON.stringify(_tmpStacks))
       console.log(this.cards)
     },
     /** @param {CardBasic[]} stack */
@@ -153,10 +163,9 @@ export default {
       if (!stack.length) return stack
       let prevCard = stack[stack.length - 1]
       prevCard.draggable = true
-      // FIXME: reset the calculate
       if (stack.length === 1) return stack
       for (let i = stack.length - 2; i >= (this.allowMovementAmount <= stack.length ? stack.length - this.allowMovementAmount : 0); (i--)) {
-        if (stack[i] === stack[i + 1].value + 1) {
+        if (this.stackCanDrop(this.cardType.get(stack[i].value), stack.slice(0, i))) {
           stack[i].draggable = true
         } else {
           return stack
@@ -174,7 +183,7 @@ export default {
     stackCanDrop (card, targetStack) {
       if (targetStack.length === 0) return true
       const targetStackTopCard = this.cardType.get(targetStack[targetStack.length - 1].value)
-      if (this.getCardColor(card.suit) === this.getCardColor(targetStackTopCard)) {
+      if (this.getCardColor(card.suit) === this.getCardColor(targetStackTopCard.suit)) {
         return false
       } else {
         if ((card.number + 1) === targetStackTopCard.number) {
@@ -245,9 +254,33 @@ export default {
     recoveryFromMemoryStack () {
       // this.memoryStack
     },
-    cardOnDragStart () { },
+    /**
+     * @param {DragEvent} ev
+     */
+    cardOnDragStart (ev, i, from, cardRef) {
+      this.$refs['ghost'].innerHTML = ''
+      let cNode = this.$refs[cardRef][0].cloneNode(true)
+      cNode.style.opacity = '1'
+      cNode.style.marginBottom = '-160px'
+      this.$refs['ghost'].appendChild(cNode)
+      console.dir(ev.target)
+      if (from === 'stack' && ev.target.parentNode.nextSibling) {
+        let _target = ev.target.parentNode.nextSibling
+        do {
+          let _node = _target.firstChild.cloneNode(true)
+          _node.style.marginBottom = '-160px'
+          this.$refs['ghost'].appendChild(_target.cloneNode(true))
+        } while ((_target = _target.nextElementSibling))
+      }
+      this.$refs['ghost'].style.opacity = '0.9'
+      this.$refs['ghost'].style.paddingBottom = 160 * this.$refs['ghost'].childElementCount + 'px'
+      ev.dataTransfer.setDragImage(this.$refs['ghost'], ev.offsetX, ev.offsetY)
+      ev.dataTransfer.setData('text/plain', JSON.stringify({ i, from }))
+      return false
+    },
     cardOnDragEnd () { },
     freeSpaceOnDrop () { },
+    stackOnDrop () { },
     getCard (num) {
       return card(`./${this.cardType.get(num).suit}_${this.cardType.get(num).number}.svg`)
     }
@@ -373,4 +406,15 @@ html, body
             size 184px 245px
             background url('./assets/hint_up/hint_up@2x.png')
             background-size contain
+  img
+    user-select none
+.ghost-space
+  width 0
+  height 0
+  position absolute
+  overflow hidden
+.ghost
+  width 152px
+  .card
+    margin-bottom -160px
 </style>
