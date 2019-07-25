@@ -25,6 +25,10 @@
           v-for="(card, i) in freeSpace"
           :key="i">
           <img v-if="card !== 0"
+            :draggable="card.draggable"
+            :data-value="card.value"
+            :ref="'card' + card.value"
+            @dragstart.stop="cardOnDragStart($event, i, 'freeSpace', 'card' + card.value)"
             :src="getCard(card.value)"
             alt="">
         </div>
@@ -47,7 +51,7 @@
           <div class="card"
             :draggable="card.draggable"
             :data-value="card.value"
-            @dragstart.stop="cardOnDragStart($event, i, 'stack', 'card' + card.value)"
+            @dragstart.stop="cardOnDragStart($event, {i, j}, 'stack', 'card' + card.value)"
             v-for="(card, j) in stack"
             :key="j">
             <img :ref="'card' + card.value"
@@ -113,7 +117,7 @@ export default {
       cards: [],
       /** @type {CardBasic[]} */
       freeSpace: [0, 0, 0, 0],
-      /** @type {number[]} */
+      /** @type {{number}[]} */
       targetSpace: [0, 0, 0, 0],
       panelIsShow: false,
       isWin: false,
@@ -121,7 +125,8 @@ export default {
       tmpDragList: null,
       memoryStack: [],
       cardType: new Map(CardTypes),
-      currentSnapShot: {}
+      currentSnapShot: {},
+      status: 'start'
     }
   },
   computed: {
@@ -198,30 +203,25 @@ export default {
     freeSpaceCanDrop (targetId = 0) {
       return this.freeSpace[targetId] === 0
     },
+    targetSpaceCanDrop (card) {},
     /**
      * @param {number} freeSpaceId
      */
     tmpMoveToFreeSpace (freeSpaceId) {
       if (this.tmpDragList.from === 'freeSpace') {
         if (this.tmpDragList.cardsPos.i === freeSpaceId) return true
-        else {
+        else if (this.freeSpace[freeSpaceId] === 0) {
           [this.freeSpace[freeSpaceId], this.freeSpace[this.tmpDragList.cardsPos.i]] = [this.freeSpace[this.tmpDragList.cardsPos.i], this.freeSpace[freeSpaceId]]
           this.pushToMemoryStack(this.tmpDragList.from, 'freeSpace', this.tmpDragList.cardsPos, { i: freeSpaceId })
           this.tmpDragList = null
           return true
         }
       } else {
-        if (this.tmpDragList.cardsPos.length > 1) {
-          alert(constant.THE_ACTION_IS_INVALID)
-          this.tmpDragList = null
-          return false
-        } else {
-          let { i } = this.tmpDragList.cardsPos
-          this.freeSpace[freeSpaceId] = this.cards[i].pop()
-          this.pushToMemoryStack(this.tmpDragList.from, 'freeSpace', this.tmpDragList.cardsPos, { i: freeSpaceId })
-          this.tmpDragList = null
-          return true
-        }
+        let { i } = this.tmpDragList.cardsPos
+        this.freeSpace[freeSpaceId] = this.cards[i].pop()
+        this.pushToMemoryStack(this.tmpDragList.from, 'freeSpace', this.tmpDragList.cardsPos, { i: freeSpaceId })
+        this.tmpDragList = null
+        return true
       }
     },
     /**
@@ -247,8 +247,31 @@ export default {
         return true
       }
     },
+    /** @param {number} targetId */
+    tmpMoveToTargetSpace (targetId) {
+      
+    },
     scanAndMoveToTargetSpace () {
+      let suitList = suits
 
+      for (let i = 0; i < this.cards.length; i++) {
+        if (this.cards[i].length === 0) continue
+        let lastCard = this.cards[i][this.cards[i].length - 1]
+        let index = this.targetSpace.findIndex(s => s === 0 || (s + 1 === lastCard && this.cardType.get(s) === this.cardType(lastCard - 1)))
+        if (~index) {
+          this.targetSpace = this.cards[i].pop()
+        }
+      }
+    },
+    winOrLose () {
+      if (this.allowMovementAmount === 0) {
+        if (_.sum(this.freeSpace) + _.sum([...[...this.cards].map(ele => ele.length)]) === 0) {
+          this.isWin = true
+        } else {
+          this.isWin = false
+        }
+        this.panelIsShow = true
+      }
     },
     pushToMemoryStack (from, to, cardsPos, targetPos) {
       this.memoryStack.push({ from, to, fromDetail: JSON.parse(JSON.stringify(cardsPos)), toDetail: JSON.parse(JSON.stringify(targetPos)) })
@@ -258,8 +281,11 @@ export default {
     },
     /**
      * @param {DragEvent} ev
+     * @param {{i:number, j:number?}} cardPos
+     * @param {string} from
+     * @param {string} cardRef
      */
-    cardOnDragStart (ev, i, from, cardRef) {
+    cardOnDragStart (ev, cardPos, from, cardRef) {
       this.$refs['ghost'].innerHTML = ''
       let cNode = this.$refs[cardRef][0].cloneNode(true)
       cNode.style.opacity = '1'
@@ -277,13 +303,44 @@ export default {
       this.$refs['ghost'].style.opacity = '0.9'
       this.$refs['ghost'].style.paddingBottom = 160 * this.$refs['ghost'].childElementCount + 'px'
       ev.dataTransfer.setDragImage(this.$refs['ghost'], ev.offsetX, ev.offsetY)
-      ev.dataTransfer.setData('text/plain', JSON.stringify({ i, from }))
+      ev.dataTransfer.setData('text/plain', JSON.stringify({ cardPos, from }))
       return false
     },
-    cardOnDragEnd () { },
-    freeSpaceOnDrop () { },
+    cardOnDragEnd () {
+      this.scanAndMoveToTargetSpace()
+      this.winOrLose()
+    },
+    /** @param {DragEvent} ev */
+    freeSpaceOnDrop (ev, freeSpaceId = 0) {
+      let cardPos = JSON.parse(ev.dataTransfer.getData('text'))
+      if (cardPos.from === 'stack') {
+        if (this.$refs['ghost'].childElementCount === 1) {
+          if (this.freeSpaceCanDrop(freeSpaceId)) {
+            this.tmpDragList = {
+              from: 'stack',
+              cardsPos: {
+                i: cardPos.i,
+                j: cardPos.j,
+                length: 1
+              }
+            }
+            this.tmpMoveToStack(freeSpaceId)
+          }
+        }
+      } else {
+        if (this.freeSpaceCanDrop(freeSpaceId)) {
+          this.tmpDragList = {
+            from: 'freeSpace',
+            cardsPos: {
+              i: cardPos.i
+            }
+          }
+          this.tmpMoveToFreeSpace(freeSpaceId)
+        }
+      }
+    },
     /**
-     * @param {DragEcent} ev
+     * @param {DragEvent} ev
      */
     stackOnDrop (ev, stackId) {
       let cardPos = JSON.parse(ev.dataTransfer.getData('text'))
@@ -293,11 +350,36 @@ export default {
         let candidates = _.takeRight(this.cards[cardPos.i], this.$refs['ghost'].childElementCount)
         let firstCard = this.cardType.get(candidates[0].value)
         let canDrop = this.stackCanDrop(firstCard, targetCardStack)
+        if (canDrop) {
+          this.tmpDragList = {
+            from: 'stack',
+            cardsPos: {
+              i: cardPos.i,
+              j: cardPos.j,
+              length: this.$refs['ghost'].childElementCount
+            }
+          }
+
+          this.tmpMoveToStack(stackId)
+        }
         console.log(canDrop)
       } else {
-        let cardStack = this.freeSpace[cardPos.i]
+        let canDrop = this.stackCanDrop(this.freeSpace(cardPos.i), this.cards[stackId])
+        if (canDrop) {
+          this.tmpDragList = {
+            from: 'freeSpace',
+            cardsPos: {
+              i: cardPos.i,
+              j: cardPos.j
+            }
+          }
+          this.tmpMoveToStack(stackId)
+        }
       }
       // this.stackCanDrop()
+    },
+    targetSpaceOnDrop (ev) {
+
     },
     getCard (num) {
       return card(`./${this.cardType.get(num).suit}_${this.cardType.get(num).number}.svg`)
