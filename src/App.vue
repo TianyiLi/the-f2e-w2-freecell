@@ -23,6 +23,8 @@
       <div class="free-space">
         <div class="free-space-ctn"
           v-for="(card, i) in freeSpace"
+          @dragover.prevent
+          @drop="freeSpaceOnDrop($event, i)"
           :key="i">
           <img v-if="card !== 0"
             :draggable="card.draggable"
@@ -117,7 +119,7 @@ export default {
       cards: [],
       /** @type {CardBasic[]} */
       freeSpace: [0, 0, 0, 0],
-      /** @type {{number}[]} */
+      /** @type {number[]} */
       targetSpace: [0, 0, 0, 0],
       panelIsShow: false,
       isWin: false,
@@ -252,14 +254,14 @@ export default {
 
     },
     scanAndMoveToTargetSpace () {
-      let suitList = suits
-
+      let ignoreSuits = (this.targetSpace.map(space => this.cardType.get(space))).sort((a, b) => a.number - b.number)
       for (let i = 0; i < this.cards.length; i++) {
         if (this.cards[i].length === 0) continue
         let lastCard = this.cards[i][this.cards[i].length - 1]
         let index = this.targetSpace.findIndex(s => s === 0 || (s + 1 === lastCard && this.cardType.get(s) === this.cardType(lastCard - 1)))
         if (~index) {
-          this.targetSpace = this.cards[i].pop()
+          this.pushToMemoryStack('stack', 'target', JSON.parse(JSON.stringify(lastCard)), index)
+          this.targetSpace[index] = this.cards[i].pop().value
         }
       }
     },
