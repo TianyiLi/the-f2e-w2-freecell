@@ -203,7 +203,7 @@ export default {
     freeSpaceCanDrop (targetId = 0) {
       return this.freeSpace[targetId] === 0
     },
-    targetSpaceCanDrop (card) {},
+    targetSpaceCanDrop (card) { },
     /**
      * @param {number} freeSpaceId
      */
@@ -249,7 +249,7 @@ export default {
     },
     /** @param {number} targetId */
     tmpMoveToTargetSpace (targetId) {
-      
+
     },
     scanAndMoveToTargetSpace () {
       let suitList = suits
@@ -343,11 +343,12 @@ export default {
      * @param {DragEvent} ev
      */
     stackOnDrop (ev, stackId) {
-      let cardPos = JSON.parse(ev.dataTransfer.getData('text'))
+      let { cardPos, from } = JSON.parse(ev.dataTransfer.getData('text'))
       console.log(cardPos)
-      if (cardPos.from === 'stack') {
+      if (from === 'stack') {
         let targetCardStack = this.cards[stackId]
         let candidates = _.takeRight(this.cards[cardPos.i], this.$refs['ghost'].childElementCount)
+        console.log(candidates, this.cards[cardPos.i])
         let firstCard = this.cardType.get(candidates[0].value)
         let canDrop = this.stackCanDrop(firstCard, targetCardStack)
         if (canDrop) {
