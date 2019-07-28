@@ -245,6 +245,7 @@ export default {
     },
     calculateAllStacksDragable () {
       for (let i = 0; i < this.cards.length; i++) {
+        if (this.cards[i].length === 0) continue
         this.cardInStackIsDraggable(this.cards[i])
       }
     },
@@ -596,14 +597,15 @@ export default {
       this.$refs['ghost'].innerHTML = ''
       let cNode = this.$refs[cardRef][0].cloneNode(true)
       cNode.style.opacity = '1'
-      cNode.style.marginBottom = '-160px'
+      let marginBottom = 160 / 3 * 2
+      cNode.style.marginBottom = `-${marginBottom}px`
       this.$refs['ghost'].appendChild(cNode)
       console.dir(ev.target)
       if (from === 'stack' && ev.target.parentNode.nextSibling) {
         let _target = ev.target.parentNode.nextSibling
         do {
           let _node = _target.firstChild.cloneNode(true)
-          _node.style.marginBottom = '-160px'
+          _node.style.marginBottom = `-${marginBottom}px`
           this.$refs['ghost'].appendChild(_target.cloneNode(true))
         } while ((_target = _target.nextElementSibling))
       }
@@ -614,6 +616,7 @@ export default {
       return false
     },
     cardOnDragEnd () {
+      this.calculateAllStacksDragable()
       this.scanAndMoveToTargetSpace()
       this.winOrLose()
       this.$refs['ghost'].innerHTML = ''
@@ -817,7 +820,7 @@ export default {
         this.scanAndMoveToTargetSpace()
         this.hintingMap.clear()
         if (from === 'stack' || this.tmpDragList.from === 'stack') {
-          this.cardInStackIsDraggable(this.cards[i])
+          this.calculateAllStacksDragable()
         }
       } else {
         switch (from) {
@@ -1029,4 +1032,5 @@ html, body
   width (152px / 3) * 2
   .card
     margin-bottom (-160px / 3) * 2
+    transform unset
 </style>
