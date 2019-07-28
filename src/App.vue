@@ -887,6 +887,7 @@ html, body
   -moz-osx-font-smoothing grayscale
   size 1920px 1080px
   position relative
+  margin 0 auto
   .logo
     size 384px 51px
     top (52px / 3) * 2
