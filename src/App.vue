@@ -872,8 +872,8 @@ export default {
 </script>
 <style lang="stylus">
 size($w, $h = $w)
-  height $h
-  width $w
+  height ($h / 3 )* 2
+  width ($w / 3) * 2
 html, body
   width 100%
   height 100%
@@ -889,43 +889,43 @@ html, body
   position relative
   .logo
     size 384px 51px
-    top 52px
-    left 180px
+    top (52px / 3) * 2
+    left (180px / 3) * 2
     position absolute
   .round, .time, .score
     color #E6BF8D
     white-space nowrap
   .round
     size 129px 37px
-    font-size 28px
+    font-size (28px / 3) * 2
     position absolute
-    left 597px
-    top 66px
+    left (597px / 3) * 2
+    top (66px / 3) * 2
   .time
     position absolute
     size 218px 53px
-    left 1292px
-    top 50px
-    font-size 40px
+    left (1292px / 3) * 2
+    top (50px / 3) * 2
+    font-size (40px / 3) * 2
     font-weight bold
   .score
     position absolute
     size 160px 53px
-    left 1580px
-    top 50px
-    font-size 40px
+    left (1580px / 3) * 2
+    top (50px / 3) * 2
+    font-size (40px / 3) * 2
     font-weight bold
   .undo, .hint
     position absolute
-    size 50px
+    size (50px / 3) * 2
     cursor pointer
-    right 66px
+    right (66px / 3) * 2
   .group
     cursor pointer
     size 52px 43px
     position absolute
-    right 64px
-    top 327px
+    right (64px / 3) * 2
+    top (327px / 3) * 2
   .undo, .hint, .group
     transition 0.3s
     &:hover
@@ -933,20 +933,20 @@ html, body
     &:active
       filter drop-shadow(0 0 2px white)
   .undo
-    top 143px
+    top (143px / 3) * 2
   .hint
-    top 235px
+    top (235px / 3) * 2
   .free-space
     size 706px 215px
     position absolute
-    top 143px
-    left 180px
+    top (143px / 3) * 2
+    left (180px / 3) * 2
     display flex
     justify-content space-between
     align-items center
     .free-space-ctn
       size 154px 215px
-      border-radius 18px
+      border-radius (18px / 3) * 2
       display flex
       justify-content center
       align-items center
@@ -956,8 +956,8 @@ html, body
   .target-space
     size 706px 215px
     position absolute
-    top 143px
-    left 1034px
+    top (143px / 3) * 2
+    left (1034px / 3) * 2
     display flex
     justify-content space-between
     align-items center
@@ -966,29 +966,29 @@ html, body
       justify-content center
       align-items center
       size 154px 215px
-      border-radius 18px
+      border-radius (18px / 3) * 2
       position relative
       border 7px solid #FCCD8D
       background-color #171D29
   .bottom-space
     position absolute
-    top 421px
+    top (421px / 3) * 2
     left 50%
     transform translateX(-50%)
     display flex
-    width 1508px
+    width (1508px / 3) * 2
     justify-content space-between
     align-content flex-start
     margin 0 auto
     .stack
-      width 152px
-      min-height 215px
-      padding-bottom 160px
+      width (152px / 3) * 2
+      min-height (215px / 3) * 2
+      padding-bottom (160px / 3) * 2
       display inline-block
       &.tight .card
-        margin-bottom -170px
+        margin-bottom (-170px / 3) * 2
       .card
-        margin-bottom -160px
+        margin-bottom (-160px / 3) * 2
         position relative
         &[draggable='true']:hover
           img
@@ -999,6 +999,9 @@ html, body
     cursor pointer
   img
     user-select none
+  .card, .free-space-ctn, .target-ctn, .ghost
+    img
+      size 152px 215px
   img.is-click
     transform translateY(-10px)
     &:after
@@ -1006,8 +1009,8 @@ html, body
   .card.from:after, .free-space-ctn.from:after
     content ''
     position absolute
-    left -16px
-    top -16px
+    left (-16px / 3) * 2
+    top (-16px / 3) * 2
     size 184px 245px
     background url('./assets/hint_up/hint_up@2x.png')
     background-size contain
@@ -1022,7 +1025,7 @@ html, body
   position absolute
   overflow hidden
 .ghost
-  width 152px
+  width (152px / 3) * 2
   .card
-    margin-bottom -160px
+    margin-bottom (-160px / 3) * 2
 </style>
