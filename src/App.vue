@@ -1,68 +1,81 @@
 <template>
   <div id="app"
+    @contextmenu.prevent="() => (forceMoveToTargetSpace(), false)"
     ref="app">
     <img src="./assets/hint_up/freecell_logo@2x.png"
       alt=""
       class="logo">
-    <div class="round">#{{6384730}}</div>
-    <div class="time">Time: 00:00</div>
-    <div class="score">Score: 0</div>
+    <div class="round">#{{roundNumber}}</div>
+    <div class="time">Time: {{formatTime}}</div>
+    <div class="score">Score: {{score()}}</div>
     <img src="./assets/hint_up/undo@2x.png"
       alt=""
       class="undo"
-      @click.stop="init()">
+      @click.stop="recoveryFromMemoryStack()">
     <img src="./assets/hint_up/hint@2x.png"
       alt=""
       class="hint"
-      @click="(isWin = true, panelIsShow = true)">
+      @click="hintingOnClick()">
     <img src="./assets/hint_up/Group 1293.svg"
       alt=""
-      @click="(isWin = false, panelIsShow = true)"
+      @click="init()"
       class="group">
-    <div class="board">
-      <div class="free-space">
+    <div class="board" @click="boardOnClick">
+      <div class="free-space" @clic.stop>
         <div class="free-space-ctn"
           v-for="(card, i) in freeSpace"
+          :class="hintingMap.get(card.value)"
           @dragover.prevent
           @drop.prevent="freeSpaceOnDrop($event, i)"
+          @click.prevent.stop="cardOnClick('freeSpace', {i})"
+          :tabindex="card.value"
           :key="i">
           <img v-if="card !== 0"
             :draggable="true"
             :data-value="card.value"
             :ref="'card' + card.value"
             @dragend.prevent="cardOnDragEnd()"
+            :class="((card.value === clicked) && 'is-click') || ''"
             @dragstart.stop="cardOnDragStart($event, {i}, 'freeSpace', 'card' + card.value)"
             :src="getCard(card.value)"
             alt="">
         </div>
       </div>
-      <div class="target-space">
+      <div class="target-space" @clic.stop>
         <div class="target-ctn"
           @dragover.prevent
           @drop.prevent="targetOnDrop($event, i)"
           v-for="(topCard, i) in targetSpace"
+          @click.prevent.stop="cardOnClick('target', {i})"
+          :tabIndex="topCard.value"
           :key="i">
           <img v-if="topCard !== 0"
+            draggable="false"
             :src="getCard(topCard)"
             alt="">
         </div>
       </div>
-      <div class="bottom-space">
+      <div class="bottom-space" @clic.stop>
         <div class="stack"
           :class="stack.length > 8 ? 'tight':''"
           v-for="(stack, i) in cards"
+          draggable="false"
           @drop.prevent="stackOnDrop($event, i)"
           @dragover.prevent
           :key="i">
           <div class="card"
-            :draggable="card.draggable"
+            :class="hintingMap.get(card.value)"
+            :draggable="'' + card.draggable"
             :data-value="card.value"
-            @dblclick="stackCardOnDBClick(i, j)"
+            @dblclick.capture.stop="card.draggable ? stackCardOnDBClick(i, j) : stackCardOnDBClick(i, stack.length - 1)"
             @dragend.prevent="cardOnDragEnd()"
             @dragstart.stop="cardOnDragStart($event, {i, j}, 'stack', 'card' + card.value)"
+            @click.prevent.stop="card.draggable ? cardOnClick('stack', {i, j}) : cardOnClick('stack', {i, j: stack.length - 1})"
             v-for="(card, j) in stack"
             :key="j">
             <img :ref="'card' + card.value"
+              :class="((card.value === clicked) && 'is-click') || ''"
+              :draggable="'' + card.draggable"
               :src="getCard(card.value)">
           </div>
         </div>
@@ -70,6 +83,7 @@
     </div>
     <Panel v-if="panelIsShow"
       v-model="panelIsShow"
+      @panel="panelOnClick"
       :isWin="isWin"></Panel>
     <div class="ghost-space">
       <div class="ghost"
@@ -81,7 +95,6 @@
 <script>
 import Panel from './components/Panel'
 import _ from 'lodash'
-import constant from './constant'
 const card = require.context('./assets/CARDS')
 const suits = ['tr', 'ca', 'cc', 'pi']
 /**
@@ -105,24 +118,14 @@ export default {
     Panel
   },
   mounted () {
-    // this.tableResize()
-    // window.addEventListener('resize', () => this.tableResize())
     this.init()
-    window.tmpMoveToFreeSpace = this.tmpMoveToFreeSpace.bind(this)
-    window.tmpMoveToStack = this.tmpMoveToStack.bind(this)
-    this.tmpDragList = {
-      cardsPos: {
-        i: 0,
-        j: 6,
-        length: 1
-      },
-      from: 'stack'
-    }
+    window.$v = this
   },
   data () {
     return {
       /** @type {CardBasic[][]} */
       cards: [],
+      currentRoundSnapShot: '',
       /** @type {CardBasic[]} */
       freeSpace: [0, 0, 0, 0],
       /** @type {number[]} */
@@ -131,11 +134,15 @@ export default {
       panelIsShow: false,
       isWin: false,
       /** @type {{cardsPos: {i: number, j:number, length:number}, from: 'stack'} | {cardsPos: {i:number}, from: 'freeSpace'}} */
-      tmpDragList: null,
+      tmpDragList: false,
       memoryStack: [],
       cardType: new Map(CardTypes),
-      currentSnapShot: {},
-      status: 'start'
+      status: 'start',
+      roundNumber: ~~(Math.random() * 9999999),
+      hintingMap: new Map(),
+      clicked: -1,
+      timer: -1,
+      timeStamp: 0
     }
   },
   computed: {
@@ -144,35 +151,58 @@ export default {
       let bottomFreeSpace = _.sum(this.cards.map(e => {
         return (!!e && +(!e.length)) || 0
       })) + 1
-      console.log(topFreeSpace)
-      console.log(bottomFreeSpace)
       if ((topFreeSpace + bottomFreeSpace) === 3) return 2
       else if ((topFreeSpace + bottomFreeSpace) === 2) return 1
       else {
         return Math.min(topFreeSpace * bottomFreeSpace, 13)
       }
+    },
+    formatTime () {
+      let timeStamp = this.timeStamp
+      let sec = '00' + timeStamp % 60
+      let mins = '00' + ~~(timeStamp / 60)
+      return `${mins.slice(-2)}:${sec.slice(-2)}`
     }
   },
   methods: {
-    init () {
+    boardOnClick () {
+      this.clicked = -1
+      console.log('boardClick')
+    },
+    score () {
+      return _.sum(this.targetSpace.map(e => (e && this.cardType.get(e).number) || 0))
+    },
+    init (isRestart = false) {
+      this.clicked = -1
       this.freeSpace = [0, 0, 0, 0]
       this.targetSpace = [0, 0, 0, 0]
-      this.tmpDragList = null
+      this.tmpDragList = false
       this.memoryStack = []
+      this.autoScanNeededCardMem = new Map([['*', 0]])
+      this.isWin = false
       let _tmpStacks = []
+      this.hintingMap = new Map()
       this.cards = Array(8).fill([{ value: 1, draggable: false }])
-
+      this.timeStamp = 0
+      clearInterval(this.timer)
       let cards = Array.from({ length: 52 }, (_, i) => ({ value: (i + 1), draggable: false }))
       cards = _.shuffle(cards)
+      if (isRestart) {
+        cards = JSON.parse(this.currentRoundSnapShot)
+      } else {
+        this.currentRoundSnapShot = JSON.stringify(cards)
+        this.roundNumber = ~~(Math.random() * 9999999)
+      }
       for (let i = 0; i < 4; i++) {
         _tmpStacks.push(this.cardInStackIsDraggable(cards.splice(0, 7)))
       }
       for (let i = 0; i < 4; i++) {
         _tmpStacks.push(this.cardInStackIsDraggable(cards.splice(0, 6)))
       }
+      this.timer = setInterval(() => {
+        this.timeStamp++
+      }, 1000)
       this.cards = JSON.parse(JSON.stringify(_tmpStacks))
-      this.currentSnapShot = JSON.parse(JSON.stringify(_tmpStacks))
-      console.log(this.cards)
     },
     /** @param {CardBasic[]} stack */
     cardInStackIsDraggable (stack = []) {
@@ -195,11 +225,12 @@ export default {
     /**
      * @param {PokerBasic} card
      * @param {CardBasic[]} targetStack
+     * @param {number} length
      */
-    stackCanDrop (card, targetStack) {
+    stackCanDrop (card, targetStack, length) {
+      if (length > this.allowMovementAmount) return false
       if (targetStack.length === 0) return true
       const targetStackTopCard = this.cardType.get(targetStack[targetStack.length - 1].value)
-      console.log(targetStackTopCard)
       let draggingCardColor = this.getCardColor(card.suit)
       let targetTopCardColor = this.getCardColor(targetStackTopCard.suit)
       if (draggingCardColor === targetTopCardColor) {
@@ -219,7 +250,7 @@ export default {
     },
     freeSpaceCanDrop (targetId = -1) {
       if (targetId === -1) {
-        return (~this.freeSpace.indexOf(0))
+        return (!!~this.freeSpace.indexOf(0))
       } else {
         return this.freeSpace[targetId] === 0
       }
@@ -228,8 +259,9 @@ export default {
      * @param {PokerBasic} card
      */
     targetSpaceCanDrop (card, targetId = -1) {
+      if (card.number === 1) return true
       if (targetId === -1) {
-        if (~(this.freeSpace.findIndex(e => this.cardType.get(e + 1) === card))) {
+        if (~(this.targetSpace.findIndex(e => this.cardType.get(e + 1) === card))) {
           return true
         }
       } else {
@@ -243,51 +275,42 @@ export default {
      * @param {number} freeSpaceId
      */
     tmpMoveToFreeSpace (freeSpaceId) {
+      this.clicked = -1
       if (this.tmpDragList.from === 'freeSpace') {
         if (this.tmpDragList.cardsPos.i === freeSpaceId) return true
         else if (this.freeSpace[freeSpaceId] === 0) {
           [this.freeSpace[freeSpaceId], this.freeSpace[this.tmpDragList.cardsPos.i]] = [this.freeSpace[this.tmpDragList.cardsPos.i], this.freeSpace[freeSpaceId]]
-          this.pushToMemoryStack(this.tmpDragList.from, 'freeSpace', this.tmpDragList.cardsPos, { i: freeSpaceId })
-          this.tmpDragList = null
-          return true
         }
       } else {
         let { i } = this.tmpDragList.cardsPos
         this.freeSpace[freeSpaceId] = this.cards[i].pop()
-        this.pushToMemoryStack(this.tmpDragList.from, 'freeSpace', this.tmpDragList.cardsPos, { i: freeSpaceId })
-        this.tmpDragList = null
-        return true
       }
+      this.pushToMemoryStack(this.tmpDragList.from, 'freeSpace', this.tmpDragList.cardsPos, { i: freeSpaceId })
+      this.tmpDragList = false
     },
     /**
      * @param {number} stackId
      */
     tmpMoveToStack (stackId) {
+      this.clicked = -1
       if (this.tmpDragList.from === 'freeSpace') {
         // confirm the input card value is card stack last card value - 1
         this.cards[stackId].push(this.freeSpace[this.tmpDragList.cardsPos.i])
         this.freeSpace[this.tmpDragList.cardsPos.i] = 0
-        this.pushToMemoryStack(this.tmpDragList.from, 'stack', this.tmpDragList.cardsPos, { i: stackId })
-        this.tmpDragList = null
-        return true
       } else {
-        if (this.tmpDragList.cardsPos.length > this.allowMovementAmount) {
-          alert(constant.THE_ACTION_IS_INVALID)
-          this.tmpDragList = null
-          return false
-        }
         [].push.call(this.cards[stackId], ...this.cards[this.tmpDragList.cardsPos.i].splice(this.tmpDragList.cardsPos.j))
-        this.pushToMemoryStack(this.tmpDragList.from, 'stack', this.tmpDragList.cardsPos, { i: stackId })
-        this.tmpDragList = null
-        return true
       }
+      this.pushToMemoryStack(this.tmpDragList.from, 'stack', this.tmpDragList.cardsPos, { i: stackId })
+      this.tmpDragList = false
     },
     /** @param {number} targetId */
     tmpMoveToTargetSpace (targetId = -1) {
+      this.clicked = -1
       let card = this.tmpDragList.from === 'stack' ? this.cards[this.tmpDragList.cardsPos.i].pop() : this.freeSpace[this.tmpDragList.cardsPos.i]
       if (targetId === -1) {
         if (card.value % 13 === 1) {
-          this.targetSpace[(targetId = this.targetSpace.indexOf(0))] = card.value
+          targetId = this.targetSpace.indexOf(0)
+          this.targetSpace[targetId] = card.value
         } else {
           this.targetSpace.some((ele, i) => {
             if (this.cardType.get(ele + 1) === this.cardType.get(card.value)) {
@@ -296,16 +319,88 @@ export default {
             } else return false
           })
         }
-        this.freeSpace[this.tmpDragList.cardsPos.i] = 0
       } else {
         this.targetSpace[targetId] = card.value
       }
+      if (this.tmpDragList.from === 'freeSpace') {
+        this.freeSpace[this.tmpDragList.cardsPos.i] = 0
+      }
       this.pushToMemoryStack(this.tmpDragList.from, 'target', this.tmpDragList.cardsPos, { i: targetId })
+      this.tmpDragList = false
+      this.$forceUpdate()
+    },
+    forceMoveToTargetSpace (isRecursive = false) {
+      let targetExpect = this.targetSpace.map(ele => {
+        if (ele === 0) return '*'
+        if (ele % 13 === 0) return 'finish'
+        return this.cardType.get(ele + 1)
+      })
+      for (let i = 0; i < this.freeSpace.length; i++) {
+        if (this.freeSpace[i] === 0) continue
+        if (this.freeSpace[i].value % 13 === 1) {
+          this.tmpDragList = {
+            from: 'freeSpace',
+            cardsPos: { i }
+          }
+          let targetIndex = targetExpect.indexOf('*')
+          this.tmpMoveToTargetSpace(targetIndex)
+          isRecursive = false
+          targetExpect[targetIndex] = this.cardType.get(this.targetSpace[targetIndex])
+        } else {
+          let { suit, number } = this.cardType.get(this.freeSpace[i].value)
+          let targetIndex = targetExpect.findIndex(ele => ele !== '*' && (ele.number === number && suit === ele.suit))
+          if (!~targetIndex) continue
+          this.tmpDragList = {
+            from: 'freeSpace',
+            cardsPos: { i }
+          }
+          this.tmpMoveToTargetSpace(targetIndex)
+          isRecursive = false
+          targetExpect[targetIndex] = JSON.parse(JSON.stringify({ suit, number: number + 1 > 13 ? 'finish' : number }))
+        }
+      }
+      for (let i in this.cards) {
+        if (this.cards[i].length === 0) continue
+        let lastCard = this.cardType.get(_.last(this.cards[i]).value)
+        if (lastCard.number === 1) {
+          this.tmpDragList = {
+            from: 'stack',
+            cardsPos: {
+              i,
+              j: this.cards[i].length - 1,
+              length: 1
+            }
+          }
+          let targetIndex = targetExpect.indexOf('*')
+          this.tmpMoveToTargetSpace(targetIndex)
+          isRecursive = false
+          targetExpect[targetIndex] = this.cardType.get(this.targetSpace[targetIndex])
+        } else {
+          this.tmpDragList = {
+            from: 'stack',
+            cardsPos: {
+              i,
+              j: this.cards[i].length - 1,
+              length: 1
+            }
+          }
+          let targetIndex = targetExpect.findIndex(ele => ele !== '*' && lastCard.number === ele.number && lastCard.suit === ele.suit)
+          if (!~targetIndex) continue
+          this.tmpMoveToTargetSpace(targetIndex)
+          isRecursive = false
+          let { suit, number } = lastCard
+          targetExpect[targetIndex] = JSON.parse(JSON.stringify({ suit, number: number + 1 > 13 ? 'finish' : number }))
+        }
+      }
+      if (isRecursive !== true) this.forceMoveToTargetSpace(true)
+      else this.winOrLose()
     },
     scanAndMoveToTargetSpace (isRecursive = false) {
       if (this.autoScanNeededCardMem.get('*') < 4) {
         for (let i in this.cards) {
-          if (this.cards[i].slice(-1)[0].value % 13 === 1) {
+          if (this.cards[i].length === 0) continue
+          let lastCard = _.last(this.cards[i])
+          if (lastCard.value % 13 === 1 || (lastCard.value % 13 === 2 && this.targetSpaceCanDrop(this.cardType.get(lastCard.value)))) {
             this.tmpDragList = {
               from: 'stack',
               cardsPos: {
@@ -314,9 +409,11 @@ export default {
                 j: this.cards[i].length - 1
               }
             }
-            this.autoScanNeededCardMem.set(this.autoScanNeededCardMem.get('*') + 1)
+            if (lastCard.value % 13 === 1) {
+              this.autoScanNeededCardMem.set('*', this.autoScanNeededCardMem.get('*') + 1)
+            }
             this.tmpMoveToTargetSpace()
-            this.tmpDragList = null
+            this.tmpDragList = false
             isRecursive = false
           }
         }
@@ -324,19 +421,20 @@ export default {
           if (this.freeSpace[i].value % 13 === 1) {
             this.tmpDragList = { from: 'freeSpace', cardsPos: { i } }
             this.tmpMoveToTargetSpace()
-            this.autoScanNeededCardMem.set(this.autoScanNeededCardMem.get('*') + 1)
-            this.tmpDragList = null
+            this.autoScanNeededCardMem.set('*', this.autoScanNeededCardMem.get('*') + 1)
+            this.tmpDragList = false
             isRecursive = false
           }
         }
-        if (!isRecursive && this.autoScanNeededCardMem.get('*') < 4) {
+        if (!isRecursive && this.autoScanNeededCardMem.get('*') <= 4) {
           this.scanAndMoveToTargetSpace(true)
         }
       } else {
-        let min = Math.min(...this.targetSpace.map(e => this.cardType.get(e)))
+        let min = Math.min(...this.targetSpace.map(e => this.cardType.get(e).number))
         if (this.targetSpace.every(e => e === min)) min += 1
         for (let i in this.cards) {
-          let card = this.cardType.get(this.cards[i].slice(-1))
+          if (this.cards[i].length === 0) continue
+          let card = this.cardType.get(_.last(this.cards[i]).value)
           if (card.number !== min + 1) continue
           let state = this.targetSpaceCanDrop(card)
           if (!state) continue
@@ -344,42 +442,148 @@ export default {
             from: 'stack', cardsPos: { length: 1, i, j: this.cards[i].length - 1 }
           }
           this.tmpMoveToTargetSpace()
-          isRecursive = true
-          this.tmpDragList = null
+          isRecursive = false
+          this.tmpDragList = false
         }
         if (!this.freeSpace.every(e => e === 0)) {
           for (let i in this.freeSpace) {
             if (this.freeSpace[i] === 0) continue
-            let card = this.cardType.get(this.freeSpace[i])
+            let card = this.cardType.get(this.freeSpace[i].value)
             if (card.number !== min + 1) continue
-            let state = this.targetSpaceCanDrop()
+            let state = this.targetSpaceCanDrop(card)
             if (!state) continue
             this.tmpDragList = {
               from: 'freeSpace', cardsPos: { i }
             }
             this.tmpMoveToTargetSpace()
-            this.tmpDragList = null
-            isRecursive = true
+            this.tmpDragList = false
+            isRecursive = false
           }
         }
-        if (this.targetSpace.every(e => e === min) && !isRecursive) this.scanAndMoveToTargetSpace(true)
+        min = Math.min(...this.targetSpace.map(e => this.cardType.get(e).number))
+        if (this.targetSpace.every(e => (((e - 1) % 13) + 1) === min) && !isRecursive) this.scanAndMoveToTargetSpace(true)
+      }
+    },
+    /**
+     * @desc {{from: 'stack', to: 'freeSpace', fromThe: {i: number, j:0}, toThe:{i:number}}} fromStackToFreeSpace
+     * @desc {{from: 'stack', to: 'stack', fromThe: {i: number, j:number, length: number}, toThe:{i:number}}} fromStackToStack
+     * @desc {{from: 'stack', to: 'target', fromThe: {i: number, j: number}}} fromStackToTarget
+     * @desc {{from: 'freeSpace', to: 'stack', fromThe: {i:number}, toThe: {i:number}}} fromFreeSpaceToStack
+     * @desc {{from: 'freeSpace', to: 'target', fromThe: {i:number}}} fromFreeSpaceToTarget
+     * @returns {{from: string, to: string, fromThe: {i:number, j:number, length: number}, toThe:{i:number}}}
+     *
+     * @param {PokerBasic | false} tmpCard
+     */
+    hintingValidate (tmpCard = false) {
+      let freeSpaceId = this.freeSpace.findIndex(e => e === 0)
+      let stackNextPredict = new Map()
+      let stackNextPredictIndex = new Set()
+      this.cards.forEach((stack, i) => {
+        if (stack.length === 0 ||
+          _.last(stack).value % 13 === 1) {
+        } else {
+          let stackLast = _.last(stack)
+          let card = this.cardType.get(stackLast.value)
+          stackNextPredict.set(`${this.getCardColor(card.suit) === 'black' ? 'red' : 'black'}/${card.number - 1}`, i)
+          stackNextPredictIndex.add((card.number - 1) % 13)
+        }
+      })
+      for (let i = 0; i < this.cards.length; i++) {
+        let stack = this.cards[i]
+        if (stack.length === 0) continue
+        if (stack.length === 1 && freeSpaceId !== -1) return { from: 'stack', to: 'freeSpace', fromThe: { i, j: 0 }, toThe: { i: freeSpaceId } }
+        if (this.targetSpaceCanDrop(this.cardType.get(_.last(stack).value))) return { from: 'stack', to: 'target', fromThe: { i, j: stack.length - 1 } }
+        let predictIndex = _.findLastIndex(stack, card => stackNextPredictIndex.has(card.value % 13))
+        if (~predictIndex && !stack[predictIndex].draggable) continue
+        let { number, suit } = this.cardType.get(stack[predictIndex].value)
+        if (~predictIndex && stackNextPredict.has(`${this.getCardColor(suit)}/${number}`) && (stack.length - predictIndex < this.allowMovementAmount)) {
+          return { from: 'stack', to: 'stack', fromThe: { i, j: predictIndex, length: stack.length - predictIndex }, toThe: { i: stackNextPredict.get(`${this.getCardColor(suit)}/${number}`) } }
+        }
+      }
+      for (let i = 0; i < this.freeSpace.length; i++) {
+        if (this.freeSpace[i] === 0) continue
+        if (this.targetSpaceCanDrop(this.cardType.get(this.freeSpace[i].value))) {
+          return { from: 'freeSpace', to: 'target', fromThe: { i } }
+        }
+        let card = this.cardType.get(this.freeSpace[i].value)
+        if (stackNextPredictIndex.has(this.freeSpace[i].value % 13) &&
+          stackNextPredict.has(`${this.getCardColor(card.suit)}/${card.number}`)) {
+          return {
+            from: 'freeSpace',
+            to: 'stack',
+            fromThe: {
+              i
+            },
+            toThe: {
+              i: stackNextPredict.get(`${this.getCardColor(card.suit)}/${card.number}`)
+            }
+          }
+        }
+      }
+      return false
+    },
+    hintingOnClick () {
+      this.hintingMap.clear()
+      let result = this.hintingValidate()
+      console.log(result)
+      switch (result.from) {
+        case 'stack':
+          this.hintingMap.set(this.cards[result.fromThe.i][result.fromThe.j].value, 'from')
+          break
+        case 'freeSpace':
+          this.hintingMap.set(this.freeSpace[result.fromThe.i].value, 'from')
+          break
       }
     },
     winOrLose () {
-      if (this.allowMovementAmount === 0) {
-        if (_.sum(this.freeSpace) + _.sum([...[...this.cards].map(ele => ele.length)]) === 0) {
-          this.isWin = true
-        } else {
-          this.isWin = false
-        }
-        this.panelIsShow = true
+      if (_.sum(this.targetSpace) === 130) {
+        this.isWin = true
+      } else if (this.allowMovementAmount !== 1 || this.hintingValidate()) {
+        return false
+      } else {
+        this.isWin = false
       }
+      clearInterval(this.timer)
+      this.panelIsShow = true
     },
-    pushToMemoryStack (from, to, cardsPos, targetPos) {
-      this.memoryStack.push({ from, to, fromDetail: JSON.parse(JSON.stringify(cardsPos)), toDetail: JSON.parse(JSON.stringify(targetPos)) })
+    pushToMemoryStack (from, to, fromThe, toThe) {
+      this.memoryStack.push({ from, to, fromThe: JSON.parse(JSON.stringify(fromThe)), toThe: JSON.parse(JSON.stringify(toThe)) })
     },
     recoveryFromMemoryStack () {
-      // this.memoryStack
+      if (!this.memoryStack.length) return
+      /**
+       * @type {{from: 'freeSpace'|'stack', to: 'freeSpace'|'target'|'stack', fromThe: {i:number, j:number, length:number}, toThe: {i: number}}}
+       */
+      let mem = this.memoryStack.pop()
+      if (mem.from === 'stack') {
+        switch (mem.to) {
+          case 'freeSpace':
+            this.cards[mem.fromThe.i].push(this.freeSpace[mem.toThe.i])
+            this.freeSpace[mem.toThe.i] = 0
+            break
+          case 'stack':
+            this.cards[mem.fromThe.i].splice(this.cards[mem.fromThe.i].length, 0, ...this.cards[mem.toThe.i].splice(-mem.fromThe.length))
+            break
+          case 'target':
+            this.cards[mem.fromThe.i].push({ value: this.targetSpace[mem.toThe.i], draggable: true })
+            this.targetSpace[mem.toThe.i] = (this.targetSpace[mem.toThe.i] % 13) === 1 ? 0 : this.targetSpace[mem.toThe.i] - 1
+            break
+        }
+        this.cardInStackIsDraggable(this.cards[mem.fromThe.i])
+      } else {
+        switch (mem.to) {
+          case 'freeSpace':
+            [this.freeSpace[mem.fromThe.i], this.freeSpace[mem.toThe.i]] = [this.freeSpace[mem.toThe.i], this.freeSpace[mem.fromThe.i]]
+            break
+          case 'stack':
+            this.freeSpace[mem.fromThe.i] = this.cards[mem.fromThe.i].pop()
+            break
+          case 'target':
+            this.freeSpace[mem.fromThe.i] = { value: this.targetSpace[mem.toThe.i], draggable: true }
+            this.targetSpace[mem.toThe.i] = (this.targetSpace[mem.toThe.i] % 13) === 1 ? 0 : this.targetSpace[mem.toThe.i] - 1
+            break
+        }
+      }
     },
     /**
      * @param {DragEvent} ev
@@ -388,6 +592,7 @@ export default {
      * @param {string} cardRef
      */
     cardOnDragStart (ev, cardPos, from, cardRef) {
+      this.hintingMap.clear()
       this.$refs['ghost'].innerHTML = ''
       let cNode = this.$refs[cardRef][0].cloneNode(true)
       cNode.style.opacity = '1'
@@ -409,32 +614,33 @@ export default {
       return false
     },
     cardOnDragEnd () {
-      // console.log('onEnd')
       this.scanAndMoveToTargetSpace()
       this.winOrLose()
       this.$refs['ghost'].innerHTML = ''
     },
     stackCardOnDBClick (i, j) {
-      console.log(i, j)
-      let ev = {
-        dataTransfer: {
-          getData () {
-            return JSON.stringify({
-              cardPos: {
-                i, j, length: 1
-              },
-              from: 'stack'
-            })
-          }
+      this.hintingMap.clear()
+      this.tmpDragList = {
+        from: 'stack',
+        cardsPos: {
+          i,
+          j,
+          length: 1
         }
       }
       let index = this.freeSpace.findIndex(s => s === 0)
-      this.$refs['ghost'].appendChild(document.createElement('div'))
-      ~index && this.freeSpaceOnDrop(ev, index)
-      this.$refs['ghost'].innerHTML = ''
+      if (~index) {
+        this.tmpMoveToFreeSpace(index)
+      } else if (this.cards[i][j] && this.targetSpaceCanDrop(this.cardType.get(this.cards[i][j].value))) {
+        this.tmpMoveToTargetSpace()
+      }
+      this.scanAndMoveToTargetSpace()
+      this.cardInStackIsDraggable(this.cards[i])
+      this.winOrLose()
     },
     /** @param {DragEvent} ev */
     freeSpaceOnDrop (ev, freeSpaceId = 0) {
+      console.log('onDrop')
       let { cardPos, from } = JSON.parse(ev.dataTransfer.getData('text'))
       console.log(cardPos, from)
       if (from === 'stack') {
@@ -469,12 +675,14 @@ export default {
      */
     targetOnDrop (ev, targetId) {
       let { cardPos, from } = JSON.parse(ev.dataTransfer.getData('text'))
+      console.log(targetId)
       if (from === 'stack') {
         if (this.$refs['ghost'].childElementCount === 1) {
           let card = this.cardType.get(this.cards[cardPos.i][cardPos.j].value)
+          console.log(card)
           if (this.targetSpaceCanDrop(card)) {
             this.tmpDragList = {
-              from,
+              from: 'stack',
               cardsPos: {
                 length: 1,
                 i: cardPos.i,
@@ -485,16 +693,19 @@ export default {
           }
         }
       } else {
-        let card = this.cardType.get(this.cardType.get(this.freeSpace[cardPos].value))
-        if (this.targetSpaceCanDrop(card)) {
+        let freeSpaceCard = this.freeSpace[cardPos.i]
+        let _card = this.cardType.get(freeSpaceCard.value)
+        if (this.targetSpaceCanDrop(_card, targetId)) {
           this.tmpDragList = {
             from: 'freeSpace',
             cardsPos: {
               i: cardPos.i
             }
           }
+          this.tmpMoveToTargetSpace(targetId)
         }
       }
+      this.$refs['ghost'].innserHTML = ''
     },
     /**
      * @param {DragEvent} ev
@@ -544,6 +755,117 @@ export default {
     },
     getCard (num) {
       return card(`./${this.cardType.get(num).suit}_${this.cardType.get(num).number}.svg`)
+    },
+    cardOnClick (from, { i, j }) {
+      if (this.tmpDragList) {
+        if (this.tmpDragList.from === from && this.tmpDragList.cardsPos.i === i) {
+          this.clicked = -1
+          this.tmpDragList = false
+          return
+        }
+        switch (from) {
+          case 'freeSpace':
+            if (this.freeSpaceCanDrop(i)) {
+              this.tmpMoveToFreeSpace(i)
+            }
+            break
+          case 'target':
+            if (this.tmpDragList.from === 'stack') {
+              if (!this.targetSpaceCanDrop(this.cardType.get(this.cards[this.tmpDragList.cardsPos.i].slice(-1)[0].value))) {
+                this.tmpDragList = false
+                return false
+              }
+            } else if (!this.targetSpaceCanDrop(this.cardType.get(this.freeSpace[this.tmpDragList.cardsPos.i]))) {
+              this.tmpDragList = false
+              return false
+            }
+            this.tmpMoveToTarget(i)
+            break
+          case 'stack':
+            if (this.tmpDragList.from === 'stack') {
+              let { number, suit } = this.cardType.get(_.last(this.cards[i]).value)
+              if (number === 1) {
+                this.scanAndMoveToTargetSpace()
+                this.tmpDragList = false
+                return false
+              }
+              let expected = { number: number - 1, suit: this.getCardColor(suit) === 'black' ? 'red' : 'black' }
+              for (let i = this.tmpDragList.cardsPos.j; i < this.cards[this.tmpDragList.cardsPos.i].length; i++) {
+                let { number, suit } = this.cardType.get(this.cards[this.tmpDragList.cardsPos.i][i].value)
+                if (number === expected.number && this.getCardColor(suit) === expected.suit) {
+                  if (i === (+this.tmpDragList.cardsPos.j) + i) {
+                    break
+                  } else {
+                    this.tmpDragList.cardsPos.j = i
+                    this.tmpDragList.cardsPos.length = this.cards[this.tmpDragList.cardsPos.i].length - i + 1
+                    break
+                  }
+                }
+              }
+              if (!this.stackCanDrop(this.cardType.get(this.cards[this.tmpDragList.cardsPos.i][this.tmpDragList.cardsPos.j].value), this.cards[i], this.tmpDragList.cardsPos.length)) {
+                alert('Invalid movement')
+                this.tmpDragList = false
+                return false
+              }
+            } else if (!this.stackCanDrop(this.cardType.get(this.freeSpace[this.tmpDragList.cardsPos.i].value), this.cards[i], 1)) {
+              this.tmpDragList = false
+              return false
+            }
+            this.tmpMoveToStack(i)
+            break
+        }
+        this.scanAndMoveToTargetSpace()
+        this.hintingMap.clear()
+        if (from === 'stack' || this.tmpDragList.from === 'stack') {
+          this.cardInStackIsDraggable(this.cards[i])
+        }
+      } else {
+        switch (from) {
+          case 'freeSpace':
+            this.tmpDragList = {
+              from,
+              cardsPos: {
+                i
+              }
+            }
+            this.clicked = this.freeSpace[i].value
+            console.log(this.clicked)
+            break
+          case 'stack':
+            this.tmpDragList = {
+              from,
+              cardsPos: {
+                i,
+                j,
+                length: this.cards[i].length - j
+              }
+            }
+            this.clicked = _.last(this.cards[i]).value
+            console.log(this.clicked)
+            this.cardInStackIsDraggable(this.cards[i])
+            break
+        }
+      }
+    },
+    panelOnClick (action) {
+      switch (action) {
+        case 'again':
+          this.init()
+          break
+        case 'close':
+          this.panelIsShow = false
+          break
+        case 'restart':
+          this.init(true)
+          break
+        case 'renew':
+          this.init()
+          this.panelIsShow = false
+          break
+        case 'undo':
+          this.recoveryFromMemoryStack()
+          break
+      }
     }
   }
 }
@@ -604,6 +926,12 @@ html, body
     position absolute
     right 64px
     top 327px
+  .undo, .hint, .group
+    transition 0.3s
+    &:hover
+      filter drop-shadow(0 0 5px white)
+    &:active
+      filter drop-shadow(0 0 2px white)
   .undo
     top 143px
   .hint
@@ -624,6 +952,7 @@ html, body
       align-items center
       background url('assets/hint_up/Component 2 – 32.svg')
       background-size cover
+      position relative
   .target-space
     size 706px 215px
     position absolute
@@ -638,6 +967,7 @@ html, body
       align-items center
       size 154px 215px
       border-radius 18px
+      position relative
       border 7px solid #FCCD8D
       background-color #171D29
   .bottom-space
@@ -661,17 +991,31 @@ html, body
         margin-bottom -160px
         position relative
         &[draggable='true']:hover
-          margin-bottom -140px
-          &:not(:active):after
-            content ''
-            position absolute
-            top -16px
-            left -16px
-            size 184px 245px
-            background url('./assets/hint_up/hint_up@2x.png')
-            background-size contain
+          img
+            transform translateY(-15px)
+            &:active
+              transform translateY(-10px)
+  img[draggable='true']
+    cursor pointer
   img
     user-select none
+  img.is-click
+    transform translateY(-10px)
+    &:after
+      transform translateY(-10px)
+  .card.from:after, .free-space-ctn.from:after
+    content ''
+    position absolute
+    left -16px
+    top -16px
+    size 184px 245px
+    background url('./assets/hint_up/hint_up@2x.png')
+    background-size contain
+  .stack .card.from
+    &:hover:after
+      transform translateY(-15px)
+    &:active:after
+      transform translateY(-10px)
 .ghost-space
   width 0
   height 0
